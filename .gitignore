@@ -134,3 +134,10 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# Henzy Guard Config Files
+data/config.enc
+config.json
+*.config.json
+.env.*
+logs/
