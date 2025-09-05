@@ -443,6 +443,10 @@ class HenzySystem {
         };
     }
 
+    getFooterText() {
+        return 'Henzy Guard System';
+    }
+
     async henzyClearWhitelist(guildId) {
         try {
             const result = await Whitelist.deleteMany({ guildId });

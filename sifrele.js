@@ -213,8 +213,8 @@ async function createNewConfig() {
                 console.log('🚀 Şimdi botları başlatalım...'.cyan);
                 await configManager.loadEncryptedConfig(masterKey.trim());
                 
-                const config = await configManager.getConfig();
-                process.env.HENZY_CONFIG = Buffer.from(JSON.stringify(config)).toString('base64');
+                const loadedConfig = await configManager.getConfig();
+                process.env.HENZY_CONFIG = Buffer.from(JSON.stringify(loadedConfig)).toString('base64');
                 
                 const { exec } = require('child_process');
                 console.log('🔄 PM2 ile botlar başlatılıyor...'.yellow);

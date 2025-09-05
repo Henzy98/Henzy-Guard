@@ -1,4 +1,5 @@
 const { Client, GatewayIntentBits, AuditLogEvent } = require('discord.js');
+const { joinVoiceChannel, VoiceConnectionStatus, getVoiceConnection } = require('@discordjs/voice');
 const database = require('../config/database');
 const configManager = require('../config/configManager');
 const henzy = require('../data/core');
@@ -12,13 +13,15 @@ class HenzyGuard2 {
                 GatewayIntentBits.GuildMembers,
                 GatewayIntentBits.GuildMessages,
                 GatewayIntentBits.MessageContent,
-                GatewayIntentBits.GuildModeration
+                GatewayIntentBits.GuildModeration,
+                GatewayIntentBits.GuildVoiceStates
             ]
         });
 
         this.banCounts = new Map();
         this.kickCounts = new Map();
         this.antiRaidMode = false;
+        this.voiceConnections = new Map();
         
         this.setupEvents();
     }
@@ -27,10 +30,70 @@ class HenzyGuard2 {
         this.client.once('clientReady', async () => {
             console.log(`[HENZY 2] ${this.client.user.tag} active! - Ban & Kick Guard`.green);
             console.log(`[HENZY 2] Anti-Raid system ready - ${henzy.henzyGetSignature().name}`.cyan);
+            this.setupActivityRotation();
+            this.startVoiceCommandMonitoring();
+            setTimeout(() => {
+                this.checkAndRejoinVoice();
+            }, 5000);
         });
 
         this.client.on('guildBanAdd', this.henzyBanProtection.bind(this));
         this.client.on('guildMemberRemove', this.henzyKickProtection.bind(this));
+
+        this.client.on('voiceStateUpdate', (oldState, newState) => {
+            this.handleVoiceStateUpdate(oldState, newState);
+        });
+
+    }
+
+    setupActivityRotation() {
+        const { ActivityType } = require('discord.js');
+        
+        const activities = [
+            { name: 'Henzy 🤍 Guard 2', type: ActivityType.Streaming, url: 'https://www.twitch.tv/henzy37' },
+            { name: 'Henzy Core System', type: ActivityType.Streaming, url: 'https://www.twitch.tv/henzy37' },
+            { name: 'Ban & Kick Protection', type: ActivityType.Streaming, url: 'https://www.twitch.tv/henzy37' },
+            { name: 'Anti-Raid Active', type: ActivityType.Streaming, url: 'https://www.twitch.tv/henzy37' },
+            { name: 'Henzy Guard', type: ActivityType.Streaming, url: 'https://www.twitch.tv/henzy37' }
+        ];
+
+        let currentActivityIndex = 0;
+
+        this.client.user.setPresence({
+            activities: [activities[currentActivityIndex]],
+            status: 'online'
+        });
+
+        setInterval(() => {
+            currentActivityIndex = (currentActivityIndex + 1) % activities.length;
+            this.client.user.setPresence({
+                activities: [activities[currentActivityIndex]],
+                status: 'online'
+            });
+        }, 10000);
+    }
+
+    async checkAndRejoinVoice() {
+        const fs = require('fs');
+        const path = require('path');
+        
+        try {
+            const commandFile = path.join(__dirname, '..', 'data', 'voice_command.json');
+            if (fs.existsSync(commandFile)) {
+                const command = JSON.parse(fs.readFileSync(commandFile, 'utf8'));
+                const guild = this.client.guilds.cache.get(command.guildId);
+                
+                if (guild) {
+                    const channel = guild.channels.cache.get(command.channelId);
+                    if (channel && channel.type === 2) {
+                        await this.joinVoiceChannel(command.channelId, command.guildId);
+                        console.log(`[HENZY 2] Rejoined voice channel: ${channel.name}`.green);
+                    }
+                }
+            }
+        } catch (error) {
+            
+        }
     }
 
     async henzyBanProtection(ban) {
@@ -154,6 +217,73 @@ class HenzyGuard2 {
         } catch (error) {
             console.log(`[HENZY ERROR] Kick protection error: ${error}`.red);
         }
+    }
+
+    async joinVoiceChannel(channelId, guildId) {
+        try {
+            const guild = this.client.guilds.cache.get(guildId);
+            if (!guild) return null;
+
+            const channel = guild.channels.cache.get(channelId);
+            if (!channel || channel.type !== 2) return null;
+
+            const connection = joinVoiceChannel({
+                channelId: channelId,
+                guildId: guildId,
+                adapterCreator: guild.voiceAdapterCreator,
+                selfMute: true,
+                selfDeaf: true
+            });
+
+            this.voiceConnections.set(guildId, { connection, channelId });
+
+            connection.on(VoiceConnectionStatus.Disconnected, () => {
+                setTimeout(() => {
+                    if (this.voiceConnections.has(guildId)) {
+                        this.joinVoiceChannel(channelId, guildId);
+                    }
+                }, 5000);
+            });
+
+            console.log(`[HENZY 2] Ses kanalına bağlandı: ${channel.name}`.green);
+            return connection;
+        } catch (error) {
+            console.log(`[HENZY 2 ERROR] Ses kanalı bağlantı hatası: ${error}`.red);
+            return null;
+        }
+    }
+
+    handleVoiceStateUpdate(oldState, newState) {
+        if (newState.member?.user.bot && newState.member.user.id === this.client.user.id) {
+            if (!newState.channelId && this.voiceConnections.has(newState.guild.id)) {
+                const { channelId } = this.voiceConnections.get(newState.guild.id);
+                setTimeout(() => {
+                    this.joinVoiceChannel(channelId, newState.guild.id);
+                }, 2000);
+            }
+        }
+    }
+
+    startVoiceCommandMonitoring() {
+        const fs = require('fs');
+        const path = require('path');
+        
+        const commandFile = path.join(__dirname, '..', 'data', 'voice_command.json');
+        
+        setInterval(() => {
+            try {
+                if (fs.existsSync(commandFile)) {
+                    const command = JSON.parse(fs.readFileSync(commandFile, 'utf8'));
+                    
+                    if (command.action === 'joinVoice' && command.timestamp > (Date.now() - 15000)) {
+                        this.joinVoiceChannel(command.channelId, command.guildId);
+                        console.log(`[HENZY 2] Voice command received, joining channel`.green);
+                    }
+                }
+            } catch (error) {
+                
+            }
+        }, 2000);
     }
 
     async start() {
